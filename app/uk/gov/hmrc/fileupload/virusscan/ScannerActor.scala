@@ -37,11 +37,6 @@ class ScannerActor(subscribe: (ActorRef, Class[_]) => Boolean,
   private var outstandingScans = Queue.empty[Event]
   private var scanningEvent: Option[Event] = None
 
-  override def preStart: Unit = {
-    subscribe(self, classOf[QuarantineFile])
-    subscribe(self, classOf[VirusScanRequested])
-  }
-
   def receive: PartialFunction[Any, Unit] = {
     case e: QuarantineFile =>
       val fileStored = FileInQuarantineStored(e.id, e.fileId, e.fileRefId, e.created, e.name, e.length, e.contentType, e.metadata)

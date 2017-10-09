@@ -19,16 +19,19 @@ package uk.gov.hmrc.fileupload.virusscan
 import akka.actor.{ActorRef, ActorSystem}
 import akka.testkit.{ImplicitSender, TestKit}
 import cats.data.Xor
+import org.scalactic.source.Position
 import org.scalatest.Matchers
 import org.scalatest.concurrent.Eventually
 import org.scalatest.time.{Seconds, Span}
+import play.api.{Configuration, Environment}
 import play.api.libs.json.Json
 import uk.gov.hmrc.fileupload.notifier.NotifierService.NotifySuccess
 import uk.gov.hmrc.fileupload.notifier.{CommandHandler, MarkFileAsClean, QuarantineFile}
-import uk.gov.hmrc.fileupload.virusscan.ScanningService.ScanResultFileClean
-import uk.gov.hmrc.fileupload.{EnvelopeId, FileId, FileRefId, StopSystemAfterAll}
+import uk.gov.hmrc.fileupload.virusscan.ScanningService.{ScanResult, ScanResultFileClean}
+import uk.gov.hmrc.fileupload._
 import uk.gov.hmrc.play.test.UnitSpec
 
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 
 class ScannerActorSpec extends TestKit(ActorSystem("scanner")) with ImplicitSender with UnitSpec with Matchers with Eventually with StopSystemAfterAll {
@@ -54,7 +57,72 @@ class ScannerActorSpec extends TestKit(ActorSystem("scanner")) with ImplicitSend
         collector shouldBe expectedCollector(newEventToSend)
       }
     }
+
+    "retry scanning if the scanner is unavailable" in {
+      def subscribe = (_: ActorRef, _: Class[_]) => true
+      val scannerStub = new ScannerStub
+      var collector = List.empty[Any]
+
+
+      val commandHandler = new CommandHandler {
+        def notify(command: AnyRef)(implicit ec: ExecutionContext) = {
+          collector = collector.::(command)
+          Future.successful(Xor.Right(NotifySuccess))
+        }
+      }
+      val scannerActor = system.actorOf(ScannerActor.props(subscribe, scannerStub, commandHandler))
+      val retry = system.actorOf(ReTry.props(subscribe, tries = 5, retryTimeOut = 500 millis, retryInterval = 100 millis, scannerActor))
+
+      val event = QuarantineFile(EnvelopeId(), FileId(), FileRefId(), 0, "name", "pdf", 10, Json.obj())
+
+      retry ! event
+
+      eventually {
+        scannerStub.numberOfTimesCalled shouldBe 5
+      }(PatienceConfig(timeout = 60000.millis, 1000.millis), Position.here)
+    }
   }
+
+    "retry scanning if the scanner is unavailable test" in {
+      def subscribe = (_: ActorRef, _: Class[_]) => true
+      val scannerStub = new ScannerStub
+      var collector = List.empty[Any]
+
+
+      val commandHandler = new CommandHandler {
+        def notify(command: AnyRef)(implicit ec: ExecutionContext) = {
+          collector = collector.::(command)
+          Future.successful(Xor.Right(NotifySuccess))
+        }
+      }
+
+      import play.api._
+      import play.api.inject._
+      import play.core.DefaultWebCommands
+
+      val env = Environment.simple(new java.io.File("."), Mode.Dev)
+      val configuration = Configuration.load(env)
+      val context = ApplicationLoader.Context(
+        environment = env,
+        sourceMapper = None,
+        webCommands = new DefaultWebCommands(),
+        initialConfiguration = configuration
+      )
+
+      val app = new ApplicationModule(context) {
+        override lazy val actorSystem = system
+        override lazy val scanBinaryData: (EnvelopeId, FileId, FileRefId) => Future[ScanResult] = scannerStub
+      }
+
+      val event = QuarantineFile(EnvelopeId(), FileId(), FileRefId(), 0, "name", "pdf", 10, Json.obj())
+
+      app.scannerActor ! event
+
+      eventually {
+        scannerStub.numberOfTimesCalled shouldBe 2
+      }
+    }
+
 
   trait ScanFixture {
     val envelopeId = EnvelopeId()

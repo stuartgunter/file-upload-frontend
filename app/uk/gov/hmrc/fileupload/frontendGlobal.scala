@@ -46,7 +46,7 @@ import uk.gov.hmrc.fileupload.testonly.TestOnlyController
 import uk.gov.hmrc.fileupload.transfer.TransferActor
 import uk.gov.hmrc.fileupload.utils.ShowErrorAsJson
 import uk.gov.hmrc.fileupload.virusscan.ScanningService.{AvScanIteratee, ScanResult, ScanResultFileClean}
-import uk.gov.hmrc.fileupload.virusscan.{ScannerActor, ScanningService, VirusScanner}
+import uk.gov.hmrc.fileupload.virusscan.{ReTry, ScannerActor, ScanningService, VirusScanner}
 import uk.gov.hmrc.play.audit.filters.AuditFilter
 import uk.gov.hmrc.play.audit.http.config.LoadAuditingConfig
 import uk.gov.hmrc.play.audit.http.connector.{AuditConnector, AuditResult}
@@ -54,6 +54,7 @@ import uk.gov.hmrc.play.config.{AppName, ControllerConfig, RunMode, ServicesConf
 import uk.gov.hmrc.play.http.HeaderCarrier
 import uk.gov.hmrc.play.http.logging.filters.LoggingFilter
 
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future}
 
 
@@ -142,7 +143,13 @@ class ApplicationModule(context: Context) extends BuiltInComponentsFromContext(c
       s3Service.getFileLengthFromQuarantine(createS3Key(envelopeId, fileId), version.value)
   }
   // scanner
-  actorSystem.actorOf(ScannerActor.props(subscribe, scanBinaryData, commandHandler), "scannerActor")
+  private val numOfTries = configuration.getInt(s"${environment.mode}.retry.numOfTries").getOrElse(2)
+  private val retryTimeout: FiniteDuration = configuration.getInt(s"${environment.mode}.retry.retryTimeoutInMillis").getOrElse(500) millis
+  private val retryInterval: FiniteDuration = configuration.getInt(s"${environment.mode}.retry.retryIntervalInMillis").getOrElse(1000) millis
+  val scannerActor =
+    actorSystem.actorOf(
+    ReTry.props(subscribe, tries = numOfTries, retryTimeOut = retryTimeout, retryInterval = retryInterval,
+      actorSystem.actorOf(ScannerActor.props(subscribe, scanBinaryData, commandHandler), "scannerActor")))
   actorSystem.actorOf(TransferActor.props(subscribe, createS3Key, commandHandler, getFileLength, s3Service.copyFromQtoT), "transferActor")
 
   // db

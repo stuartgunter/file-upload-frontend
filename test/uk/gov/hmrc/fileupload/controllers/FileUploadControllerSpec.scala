@@ -111,6 +111,10 @@ class FileUploadControllerSpec extends UnitSpec with ScalaFutures with TestAppli
 
       status(result) shouldBe Status.OK
     }
+
+    "upload should retry if unable to upload to quarantine" in {
+      ???
+    }
   }
 
   "function metadataToJson" should {

@@ -176,6 +176,10 @@ class S3JavaSdkService(configuration: com.typesafe.config.Config, metrics: Metri
           Logger.info(s"upload-s3 completed: $fileInfo")
           promise.trySuccess(upload.waitForUploadResult())
         } else if (progressEvent.getEventType == ProgressEventType.TRANSFER_FAILED_EVENT) {
+
+
+          //FIXME retry here
+
           metricUploadFailed.mark()
           Logger.error(s"""upload-s3 Transfer events: ${events.reverse.map(_.toString).mkString("\n")}""")
           Logger.error(s"upload-s3 error: transfer failed: $fileInfo")
